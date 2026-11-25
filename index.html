@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Conciliación de pedidos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root{--bg:#f4f6f8;--cd:#fff;--tx:#1a1d21;--mu:#68717d;--bd:#dfe3e8;--pr:#0f766e;--ok:#15803d;--bad:#b91c1c;--wa:#b45309;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1214;--cd:#1a1e22;--tx:#e8eaed;--mu:#9aa1a9;--bd:#2c3238;--pr:#2dd4bf;--ok:#4ade80;--bad:#f87171;--wa:#fbbf24}}
+:root[data-theme="dark"]{--bg:#0f1214;--cd:#1a1e22;--tx:#e8eaed;--mu:#9aa1a9;--bd:#2c3238;--pr:#2dd4bf;--ok:#4ade80;--bad:#f87171;--wa:#fbbf24}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:76px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--cd);z-index:10}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:var(--cd);border-bottom:1px solid var(--bd);padding:10px 12px;display:flex;gap:8px;align-items:center}
+header span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+main{padding:12px;max-width:720px;margin:auto}
+.m{color:var(--mu);font-size:13px}.ok{color:var(--ok)}.bad{color:var(--bad)}.wa{color:var(--wa)}
+button,select,input,textarea{font:inherit;color:var(--tx);background:var(--cd);border:1px solid var(--bd);border-radius:8px;padding:9px 12px}
+button{cursor:pointer}button.p,label.btn{background:var(--pr);color:#fff;border-color:var(--pr)}
+:root[data-theme="dark"] button.p{color:#06201d}
+label.btn{display:inline-block;padding:10px 14px;border-radius:8px;cursor:pointer;margin:6px 0}
+.bar{display:flex;gap:8px;margin:8px 0}.bar input,.bar select{flex:1;min-width:0}
+.card{background:var(--cd);border:1px solid var(--bd);border-radius:10px;padding:12px;margin:8px 0;display:flex;flex-direction:column;gap:6px}
+.card.sel{border-color:var(--pr)}
+.row{display:flex;align-items:center;gap:8px;background:var(--cd);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin:5px 0}
+.row.on{border-color:var(--pr)}.row>span{flex:1;font-size:14px;min-width:0}
+.st{display:flex;gap:4px}.st button{width:38px;padding:8px 0;font-size:18px}.st input{width:54px;text-align:center;padding:8px 2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.chips span{background:var(--cd);border:1px solid var(--bd);border-radius:99px;padding:3px 10px;font-size:13px}
+.r2{display:grid;grid-template-columns:1fr 40px 32px 32px 70px;gap:4px;padding:7px 4px;border-bottom:1px solid var(--bd);font-size:13px;text-align:center}
+.r2>span:first-child{text-align:left}.r2.h{font-weight:600;color:var(--mu)}
+.r2.fa>span:last-child{color:var(--bad);font-weight:700}.r2.so>span:last-child{color:var(--wa);font-weight:700}.r2.re>span:last-child{font-weight:700}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--cd);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom,0px);z-index:9}
+nav button{flex:1;border:0;border-radius:0;padding:14px 4px;background:none}nav button.a{color:var(--pr);font-weight:700}
+.ic{width:auto!important;padding:6px 8px!important;font-size:15px!important}
+.ov{position:fixed;inset:0;background:#000;z-index:20;display:flex;flex-direction:column;color:#fff}
+.ov video{flex:1;min-height:0;object-fit:cover;width:100%}.ov .bar{padding:10px}
+.pk{background:var(--bg);color:var(--tx);overflow:auto;padding:12px;display:block}.pk button{display:block;width:100%;text-align:left;margin:4px 0}
+[hidden]{display:none!important}
+</style></head><body>
+<header><b>Conciliación</b><span id="pl" class="m">Sin pedido</span>
+<select id="who"><option value="1">Persona 1</option><option value="2">Persona 2</option></select></header>
+<main>
+<section id="t0">
+<p class="m">1) Carga el Excel (las dos personas el mismo archivo). 2) Elige el pedido. 3) Cada uno cuenta en «Contar». 4) En «Comparar» conecten la sala compartida; al terminar los dos aparece el semáforo.</p>
+<label class="btn">Cargar Excel (.xlsx)<input type="file" id="fx" accept=".xlsx,.xls" hidden></label>
+<div id="lp"></div></section>
+<section id="t1" hidden>
+<div class="bar"><input id="q" type="search" placeholder="Buscar producto…"><button id="sc" class="p">Escanear</button></div>
+<div class="bar"><input id="xn" placeholder="Producto fuera de lista"><button id="xb">Agregar</button></div>
+<div class="m" id="cn"></div><div id="l1"></div>
+<button id="dn" style="width:100%;margin-top:10px"></button></section>
+<section id="t2" hidden>
+<div class="card"><b>Sala compartida</b><div class="bar"><input id="rm" placeholder="Código de sala (mín. 8)"><button id="rg">Generar</button><button id="rc" class="p">Conectar</button></div><div id="ss" class="m">Sin conectar. Funciona sin internet y sincroniza al volver la señal.</div></div>
+<div class="bar"><select id="md"><option value="doble">Doble conteo (verificación)</option><option value="reparto">Reparto (se suma)</option></select><button id="xl" class="p">Excel</button></div>
+<div class="chips" id="ch"></div>
+<div class="bar"><select id="fl"><option value="">Todo</option><option value="fa">Faltante</option><option value="so">Sobrante</option><option value="re">Reconteo</option><option value="ok">Conforme</option></select></div>
+<div id="l2"></div></section>
+<section id="t3" hidden>
+<div class="card"><b>Registrar comprobante</b>
+<select id="dt"><option value="dep">Depósito</option><option value="gui">Guía de transporte</option><option value="otr">Otro</option></select>
+<input id="dnum" placeholder="N° de operación / guía"><input id="df" type="date">
+<div class="bar"><input id="dm" type="number" inputmode="decimal" placeholder="Monto S/"><input id="dc" type="number" inputmode="numeric" placeholder="Cajas"></div>
+<label class="btn" style="text-align:center">📷 Foto<input id="dp" type="file" accept="image/*" capture="environment" hidden></label><div id="dpn" class="m"></div>
+<button id="da" class="p">Agregar comprobante</button><div class="m">Registra cada comprobante una sola vez (una persona). Las fotos quedan en el celular de quien las toma.</div></div>
+<div id="cu"></div><div id="l3"></div></section>
+</main>
+<nav><button data-t="0">Pedido</button><button data-t="1">Contar</button><button data-t="2">Comparar</button><button data-t="3">Docs</button></nav>
+<input id="lph" type="file" accept="image/*" capture="environment" hidden>
+<div class="ov" id="imgov" hidden><img id="iv" alt="" style="flex:1;min-height:0;object-fit:contain;width:100%"><div class="bar"><button id="ic">Cerrar</button><button id="iq">Quitar foto</button></div></div>
+<div class="ov" id="scan" hidden><video id="vid" playsinline muted></video>
+<div class="bar"><input id="mc" placeholder="Código manual"><button id="mb">Usar</button><button id="sx">Cerrar</button></div>
+<div class="m" id="sm" style="padding:0 12px 12px;color:#ccc">Apunta al código de barras</div></div>
+<div class="ov pk" id="pick" hidden><b>Código nuevo: <span id="pc"></span></b><div class="m">Elige a qué producto de la lista corresponde (se recordará).</div>
+<div class="bar"><input id="pq" type="search" placeholder="Buscar…"><button id="pcx">Cancelar</button></div><div id="pk"></div></div>
+<script>
+const BROKER='wss://broker.hivemq.com:8884/mqtt';
+const $=s=>document.querySelector(s),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),nk=s=>s.toUpperCase().replace(/\s+/g,' ').trim();
+let S={peds:[],cur:null,who:'1',codes:{},cnt:{},mode:'doble',mt:0,room:'',dv:''},busy=0,pend='',rd=null,last='',lt=0,tab=0,mc=null,K=null,pt=0;
+const idb=new Promise(r=>{try{const q=indexedDB.open('cp',1);q.onupgradeneeded=()=>q.result.createObjectStore('k');q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)}catch(e){r(null)}});
+const kv=async(m,k,v)=>{const d=await idb;if(!d)return;return new Promise(r=>{const o=d.transaction('k',m==='get'?'readonly':'readwrite').objectStore('k'),q=m==='get'?o.get(k):o.put(v,k);q.onsuccess=()=>r(q.result);q.onerror=()=>r()})};
+const save=()=>{kv('put','S',S);push()};
+const key=p=>p.n+'-'+p.f,P=()=>S.peds.find(p=>key(p)===S.cur),cnt=w=>(S.cnt[S.cur]||{})[w],
+D=()=>((S.cnt[S.cur]??={})[S.who]??={c:{},x:[],done:0}),
+lab=p=>'Pedido '+p.n+(p.f?' · '+p.f.slice(8)+'/'+p.f.slice(5,7):'')+(p.d?' · '+p.d:'');
+/* ---- Sala compartida: MQTT por WSS, contenido cifrado AES-GCM ---- */
+const te=new TextEncoder(),b64=u=>btoa(String.fromCharCode(...u)),ub=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)),hx=async s=>new Uint8Array(await crypto.subtle.digest('SHA-256',te.encode(s)));
+async function keys(r){const t=[...(await hx('t'+r))].slice(0,16).map(x=>x.toString(16).padStart(2,'0')).join('');return{t,k:await crypto.subtle.importKey('raw',await hx('k'+r),'AES-GCM',false,['encrypt','decrypt'])}}
+const enc=async(o,k)=>{const iv=crypto.getRandomValues(new Uint8Array(12)),c=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},k,te.encode(JSON.stringify(o))));return b64(new Uint8Array([...iv,...c]))};
+const dec=async(s,k)=>{const u=ub(s);return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:u.slice(0,12)},k,u.slice(12))))};
+const ss=t=>{$('#ss').textContent=t};
+function push(){clearTimeout(pt);pt=setTimeout(async()=>{if(!mc||!mc.connected||!K)return;const all={};for(const pk in S.cnt)if(S.cnt[pk][S.who])all[pk]=S.cnt[pk][S.who];
+mc.publish('cpv1/'+K.t+'/'+S.who,await enc({w:S.who,dv:S.dv,all,md:S.mode,mt:S.mt},K.k),{qos:1,retain:true})},600)}
+async function join(r){r=r.trim();if(r.length<8)return ss('El código debe tener mínimo 8 caracteres');if(typeof mqtt==='undefined')return ss('No se cargó la librería de sincronización (¿sin internet?)');
+S.room=r;kv('put','S',S);K=await keys(r);if(mc)mc.end(true);
+mc=mqtt.connect(BROKER,{reconnectPeriod:3000,clientId:'cp'+Math.random().toString(16).slice(2)});
+mc.on('connect',()=>{ss('🟢 En línea · sala activa');mc.subscribe('cpv1/'+K.t+'/+',{qos:1});push()});
+mc.on('close',()=>ss('🔴 Sin conexión: se guarda en este celular y se sincroniza al volver'));
+mc.on('message',async(t,m)=>{try{const o=await dec(m.toString(),K.k);if(o.dv===S.dv)return;
+if(o.w===S.who)return ss('⚠ Otra persona usa tu mismo número de Persona; cambien uno');
+for(const pk in o.all)(S.cnt[pk]??={})[o.w]=o.all[pk];if(o.mt>S.mt){S.mode=o.md;S.mt=o.mt}
+kv('put','S',S);if(tab===2)r2()}catch(e){}})}
+$('#rg').onclick=()=>{$('#rm').value=[...crypto.getRandomValues(new Uint8Array(20))].map(x=>'abcdefghjkmnpqrstuvwxyz23456789'[x%31]).join('')};
+$('#rc').onclick=()=>join($('#rm').value);
+/* ---- Excel ---- */
+function parse(ab){const wb=XLSX.read(ab,{cellDates:true}),R=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null}),out=[];let p=null;
+for(const r of R){const a=r[0];
+if(typeof a==='string'&&/^\s*pedi\w*\s*\d+/i.test(a)){p={n:a.match(/\d+/)[0],f:r[5] instanceof Date?new Date(r[5].getTime()+43200000).toISOString().slice(0,10):'',d:'',L:[]};out.push(p);continue}
+if(!p)continue;
+if(typeof r[2]==='string'&&/^destino/i.test(r[2].trim()))p.d=String(r[5]||'').trim();
+if(typeof r[1]==='number'&&typeof r[2]==='string'&&typeof r[3]==='number')p.L.push({n:r[2].trim(),q:r[1],pu:+(r[5]||r[3]*1.18)})}
+return out.filter(p=>p.L.length)}
+function show(t){tab=t;['t0','t1','t2','t3'].forEach((id,i)=>$('#'+id).hidden=i!==t);document.querySelectorAll('nav button').forEach((b,i)=>b.classList.toggle('a',i===t));
+const p=P();$('#pl').textContent=p?lab(p):'Sin pedido';$('#who').value=S.who;$('#md').value=S.mode;$('#rm').value=S.room;[r0,r1,r2,r3][t]()}
+function r0(){$('#lp').innerHTML=S.peds.length?S.peds.map((p,i)=>{const u=p.L.reduce((a,l)=>a+l.q,0),t=p.L.reduce((a,l)=>a+l.q*l.pu,0),s=key(p)===S.cur;
+return `<div class="card${s?' sel':''}"><b>${esc(lab(p))}</b><div class="m">${p.L.length} líneas · ${u} unid. · S/ ${t.toFixed(2)}</div><button data-i="${i}">${s?'Seleccionado':'Elegir'}</button></div>`}).join(''):'<p class="m">Aún no hay pedidos cargados.</p>'}
+$('#lp').onclick=e=>{const b=e.target.closest('button');if(!b)return;S.cur=key(S.peds[+b.dataset.i]);save();show(1)};
+$('#fx').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{S.peds=parse(await f.arrayBuffer());if(!S.peds.some(p=>key(p)===S.cur))S.cur=null;save();r0();if(!S.peds.length)$('#lp').textContent='No se encontraron pedidos en el archivo.'}catch(x){$('#lp').textContent='No se pudo leer el archivo: '+x.message}};
+/* ---- Contar ---- */
+function r1(){const p=P();if(!p){$('#l1').innerHTML='<p class="m">Primero elige un pedido.</p>';$('#cn').textContent='';return}
+const d=D(),q=$('#q').value.toLowerCase();
+$('#l1').innerHTML=p.L.map((l,i)=>l.n.toLowerCase().includes(q)?`<div class="row${d.c[i]>0?' on':''}"><span>${esc(l.n)}</span><button class="ic" data-ph="${i}">${d.ph&&d.ph[i]?'🖼':'📷'}</button><div class="st"><button data-a="-" data-i="${i}">−</button><input type="number" inputmode="numeric" min="0" placeholder="0" value="${d.c[i]??''}" data-i="${i}"><button data-a="+" data-i="${i}">+</button></div></div>`:'').join('')
++(d.x.length?'<div class="m">Fuera de lista</div>':'')+d.x.map((e,i)=>`<div class="row on"><span>${esc(e.n)}</span><div class="st"><button data-a="-" data-x="${i}">−</button><input value="${e.q}" disabled><button data-a="+" data-x="${i}">+</button></div></div>`).join('');
+$('#cn').textContent=Object.keys(d.c).length+'/'+p.L.length+' líneas contadas · '+Object.values(d.c).reduce((a,b)=>a+b,0)+' unid. (no se muestra lo esperado)';
+$('#dn').textContent=d.done?'Conteo terminado ✔ (toca para reabrir)':'Terminé mi conteo (lo no contado cuenta como 0)'}
+const add=(i,v)=>{const d=D();d.c[i]=Math.max(0,(d.c[i]||0)+v);save();r1()};
+$('#l1').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.ph!=null)return phi(+b.dataset.ph);const v=b.dataset.a==='+'?1:-1;if(b.dataset.x!=null){const x=D().x[+b.dataset.x];x.q=Math.max(0,x.q+v);save();r1()}else add(+b.dataset.i,v)};
+$('#l1').onchange=e=>{const i=e.target.dataset.i;if(i==null)return;const d=D();e.target.value===''?delete d.c[i]:d.c[i]=Math.max(0,+e.target.value||0);save();r1()};
+$('#q').oninput=r1;
+$('#xb').onclick=()=>{const n=$('#xn').value.trim();if(!n||!P())return;const d=D(),z=d.x.find(e=>nk(e.n)===nk(n));z?z.q++:d.x.push({n,q:1});$('#xn').value='';save();r1()};
+$('#dn').onclick=()=>{if(!P())return;const d=D();d.done=d.done?0:1;save();r1()};
+/* ---- Escáner ---- */
+async function scan(){if(!P())return;$('#scan').hidden=false;busy=0;$('#sm').textContent='Apunta al código de barras';
+try{rd=new ZXing.BrowserMultiFormatReader();await rd.decodeFromConstraints({video:{facingMode:'environment'}},'vid',r=>{if(!r||busy)return;const c=r.getText(),t=Date.now();if(c===last&&t-lt<2500)return;last=c;lt=t;hit(c)})}
+catch(e){$('#sm').textContent='No se pudo abrir la cámara ('+e.message+'). Usa el código manual.'}}
+function stop(){try{rd&&rd.reset()}catch(e){}$('#scan').hidden=true;r1()}
+function hit(c){const p=P(),k=S.codes[c],i=k?p.L.findIndex(l=>nk(l.n)===k):-1;
+if(i>=0){add(i,1);$('#sm').textContent='✔ '+p.L[i].n+' → '+D().c[i];navigator.vibrate&&navigator.vibrate(60)}
+else{pend=c;busy=1;$('#pc').textContent=c;$('#pq').value='';rp();$('#pick').hidden=false}}
+function rp(){const q=$('#pq').value.toLowerCase();$('#pk').innerHTML=P().L.map((l,i)=>l.n.toLowerCase().includes(q)?`<button data-i="${i}">${esc(l.n)}</button>`:'').join('')}
+$('#pq').oninput=rp;
+$('#pk').onclick=e=>{const b=e.target.closest('button');if(!b)return;const i=+b.dataset.i;S.codes[pend]=nk(P().L[i].n);add(i,1);$('#pick').hidden=true;busy=0;$('#sm').textContent='✔ Vinculado: '+P().L[i].n};
+$('#pcx').onclick=()=>{$('#pick').hidden=true;busy=0};
+$('#sc').onclick=scan;$('#sx').onclick=stop;
+$('#mb').onclick=()=>{const v=$('#mc').value.trim();if(v){hit(v);$('#mc').value=''}};
+/* ---- Comparar: semáforo ---- */
+const ready=()=>{const a=cnt(1),b=cnt(2);return !!(a&&b&&a.done&&b.done)};
+const jd=(q,x,y,pu)=>{let f;if(S.mode==='reparto')f=x+y;else if(x!==y)return{s:'re',f:null,v:0};else f=x;return{s:f===q?'ok':f<q?'fa':'so',f,v:(f-q)*pu}};
+function rows(){const p=P(),a=cnt(1),b=cnt(2),R=[];
+p.L.forEach((l,i)=>{const x=a.c[i]||0,y=b.c[i]||0;R.push({n:l.n,q:l.q,x,y,...jd(l.q,x,y,l.pu)})});
+const m={};[[a,'x'],[b,'y']].forEach(([d,k])=>d.x.forEach(e=>{const z=nk(e.n);(m[z]??={n:e.n,x:0,y:0})[k]+=e.q}));
+for(const z in m){const e=m[z];R.push({n:e.n+' (fuera de lista)',q:0,x:e.x,y:e.y,...jd(0,e.x,e.y,0)})}
+return R}
+function r2(){if(!P()){$('#l2').innerHTML='<p class="m">Primero elige un pedido.</p>';$('#ch').innerHTML='';return}
+if(!ready()){const a=cnt(1),b=cnt(2),f=(d,n)=>`<span>Persona ${n}: ${d?Object.keys(d.c).length+' líneas · '+(d.done?'terminó ✔':'contando…'):'sin datos aún'}</span>`;
+$('#ch').innerHTML=f(a,1)+f(b,2);$('#l2').innerHTML='<p class="m">El semáforo aparece cuando las dos personas marquen «Terminé mi conteo».</p>';return}
+const R=rows(),T={ok:0,fa:0,so:0,re:0};R.forEach(r=>T[r.s]++);
+$('#ch').innerHTML=`<span class="ok">🟢 Conforme ${T.ok}</span><span class="bad">🔴 Faltante ${T.fa}</span><span class="wa">🟡 Sobrante ${T.so}</span><span>≠ Reconteo ${T.re}</span><span>Dif. S/ ${R.reduce((s,r)=>s+r.v,0).toFixed(2)}</span>`;
+const f=$('#fl').value,o={fa:0,so:1,re:2,ok:3};
+$('#l2').innerHTML='<div class="r2 h"><span>Producto</span><span>Lista</span><span>P1</span><span>P2</span><span></span></div>'+R.filter(r=>!f||r.s===f).sort((a,b)=>o[a.s]-o[b.s]).map(r=>`<div class="r2 ${r.s}"><span>${esc(r.n)}</span><span>${r.q}</span><span>${r.x}</span><span>${r.y}</span><span>${{ok:'🟢',fa:'🔴',so:'🟡',re:'≠'}[r.s]} ${r.f==null?'':r.f===r.q?'':(r.f>r.q?'+':'')+(r.f-r.q)}</span></div>`).join('')}
+$('#fl').onchange=r2;
+$('#md').onchange=e=>{S.mode=e.target.value;S.mt=Date.now();save();r2()};
+$('#xl').onclick=()=>{const p=P();if(!p)return;if(!ready())return ss('Para exportar, las dos personas deben marcar «Terminé mi conteo»');
+const E={ok:'Conforme',fa:'Faltante',so:'Sobrante',re:'Reconteo'},ws=XLSX.utils.aoa_to_sheet([['Producto','Lista','Persona 1','Persona 2','Final','Estado','Dif unid','Dif S/'],...rows().map(r=>[r.n,r.q,r.x,r.y,r.f??'',E[r.s],r.f==null?'':r.f-r.q,r.f==null?'':+r.v.toFixed(2)])]),wb=XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb,ws,'Conciliacion');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['Tipo','Número','Fecha','Monto S/','Cajas','Persona'],...docsOf(p).map(d=>[TY[d.t],d.n,d.f,d.m,d.c,'Persona '+d.w])]),'Documentos');XLSX.writeFile(wb,'conciliacion_pedido_'+p.n+'.xlsx')};
+/* ---- Docs: comprobantes, fotos y cuadre de dinero ---- */
+const TY={dep:'Depósito',gui:'Guía de transporte',otr:'Otro'};let PHI=0,vc=null;
+const docsOf=q=>{const sn=new Set();return[1,2].flatMap(w=>(((S.cnt[key(q)]||{})[w]||{}).docs||[]).map(d=>({...d,w}))).filter(d=>{const k=d.t+'|'+d.n;if(!d.n)return 1;if(sn.has(k))return 0;sn.add(k);return 1})};
+const sm=(L,t)=>L.filter(d=>d.t===t).reduce((s,d)=>s+(+d.m||0),0),tt=q=>q.L.reduce((s,l)=>s+l.q*l.pu,0);
+async function shrink(f){const b=await createImageBitmap(f),k=Math.min(1,1000/Math.max(b.width,b.height)),c=document.createElement('canvas');c.width=b.width*k;c.height=b.height*k;c.getContext('2d').drawImage(b,0,0,c.width,c.height);return new Promise(r=>c.toBlob(r,'image/jpeg',.7))}
+async function savePh(f){const id='ph'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);await kv('put',id,await shrink(f));return id}
+async function view(id,i){const b=await kv('get',id);if(!b)return;vc=i;$('#iv').src=URL.createObjectURL(b);$('#iq').hidden=i==null;$('#imgov').hidden=false}
+function phi(i){PHI=i;const d=D();d.ph&&d.ph[i]?view(d.ph[i],i):$('#lph').click()}
+$('#lph').onchange=async e=>{const f=e.target.files[0];if(!f||!P())return;const d=D();(d.ph??={})[PHI]=await savePh(f);e.target.value='';save();r1()};
+$('#ic').onclick=()=>{$('#imgov').hidden=true;$('#iv').src=''};
+$('#iq').onclick=()=>{const d=D();delete d.ph[vc];save();$('#ic').click();r1()};
+$('#dp').onchange=e=>{$('#dpn').textContent=e.target.files[0]?'Foto lista ✔':''};
+$('#da').onclick=async()=>{if(!P())return;const d=D(),f=$('#dp').files[0];(d.docs??=[]).push({id:Date.now().toString(36),t:$('#dt').value,n:$('#dnum').value.trim(),f:$('#df').value,m:+$('#dm').value||0,c:+$('#dc').value||0,ph:f?await savePh(f):''});
+['dnum','df','dm','dc','dp'].forEach(i=>$('#'+i).value='');$('#dpn').textContent='';save();r3()};
+$('#l3').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.v)view(b.dataset.v,null);else if(b.dataset.r){const d=D();d.docs=d.docs.filter(x=>x.id!==b.dataset.r);save();r3()}};
+function r3(){const p=P();if(!p){$('#cu').innerHTML='';$('#l3').innerHTML='<p class="m">Primero elige un pedido.</p>';return}
+const L=docsOf(p),tot=tt(p),dep=sm(L,'dep'),fl=sm(L,'gui'),df=dep-tot,gs=S.peds.reduce((s,q)=>s+sm(docsOf(q),'dep')-tt(q),0),f=n=>'S/ '+n.toFixed(2),ng=df<-0.005;
+$('#cu').innerHTML=`<div class="card"><div>Mercadería según Excel: <b>${f(tot)}</b></div><div>Depósitos registrados: <b>${f(dep)}</b></div><div class="${ng?'bad':'ok'}">${ng?'Falta depositar':'Cuadrado / a favor'}: <b>${f(Math.abs(df))}</b></div><div class="m">Fletes en guías: ${f(fl)} · Cajas: ${L.reduce((s,d)=>s+(d.c||0),0)}</div><div class="m">Saldo acumulado de todos los pedidos (sin fletes): <b>${gs<-0.005?'debe ':'a favor '}${f(Math.abs(gs))}</b></div></div>`;
+$('#l3').innerHTML=L.map(d=>`<div class="row"><span>${TY[d.t]} ${esc(d.n||'s/n')}<div class="m">${d.f||'sin fecha'} · ${f(+d.m||0)}${d.c?' · '+d.c+' cajas':''} · P${d.w}</div></span>${d.ph&&d.w==S.who?`<button class="ic" data-v="${d.ph}">🖼</button>`:d.ph?'<span class="m" style="flex:none">foto en P'+d.w+'</span>':''}${d.w==S.who?`<button class="ic" data-r="${d.id}">✕</button>`:''}</div>`).join('')||'<p class="m">Aún no hay comprobantes.</p>'}
+$('#who').onchange=e=>{S.who=e.target.value;save();show(tab)};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(+b.dataset.t));
+(async()=>{const s=await kv('get','S');if(s)Object.assign(S,s);S.dv||=Math.random().toString(36).slice(2);kv('put','S',S);show(S.cur?1:0);if(S.room)join(S.room);navigator.serviceWorker&&navigator.serviceWorker.register('sw.js').catch(()=>0)})();
+</script></body></html>
